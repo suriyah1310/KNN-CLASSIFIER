@@ -1,0 +1,188 @@
+## Preamble: Importing and Configuring Essential Packages
+
+This will naturally look cryptic to most - the key points to take away are:
+
+* the essential modules for data visualisation: `matplotlib`, `seaborn`
+* ...and for data manipulation: `pandas`, `numpy`
+* ...and for machine learning: `scikit-learn`
+* `sns.set` sets up the visualisation engine (e.g., default size of figures)
+* the `%` *magic* statements tell Jupyter Lab to place output plots in the notebook itself and to use higher resolution if possible.
+
+%matplotlib inline
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+sns.set(
+    { "figure.figsize": (6, 4) },
+    style='ticks',
+    color_codes=True,
+    font_scale=0.8
+)
+%config InlineBackend.figure_formats = set(('retina', 'svg'))
+
+## The PIMA Dataset: Loading and Inspecting Data
+
+pima = pd.read_csv(
+    'https://raw.githubusercontent.com/gerberl/6G7V0015-2223/main/datasets/diabetes.csv'
+)
+pima.head()
+
+pima.shape
+
+Our main question here is: can we build a **classification model** that predicts `Outcome` with reasonably accuracy given the demographic-health factors associated with the individuals in the dataset? (`Outcome=1` when someone developed diabetes).
+
+### Class Distribution
+
+pima['Outcome'].value_counts()
+
+pima['Outcome'].value_counts(normalize=True)
+
+fig, ax = plt.subplots()
+ax = pima['Outcome'].value_counts(normalize=True).plot.bar()
+ax.set_ylabel('Proportion')
+ax.set_xlabel('Outcome')
+ax.set_title('Target Distribution')
+
+* **Breakpoint**: Let us say that all one knows about the dataset is the distribution above. A colleague tells you they have a new patient and asks you to make a prediction of whether or not they have diabetes. You are forced to give a binary answer. What would you say and why?
+
+### Missing Values
+
+I am aware that there are missing values for many of the columns, and that `0`s seem to have been chosen by the researchers when they didn't have/know a particular measurement. If we go ahead with it, without tweaking the data, it will make analysis and machine learning a little more difficult. A typical approach is to simply replace the missing values by a representative one (e.g., the mean), and that is what we'll do here.
+
+ax = plt.subplots(figsize=(2,3))
+sns.boxplot(data=pima, y='SkinThickness');
+
+ax = plt.subplots(figsize=(2,3))
+df = pima.loc[ pima['SkinThickness']>0 ]
+sns.boxplot(data=df, y='SkinThickness');
+
+pima['SkinThickness'].mean()
+
+# make a mental note at this stage of the `.assign()` method. Here, it is
+# overwriting the original `SkinThickness` column with a newly computed one
+# by the `.replace()` method.
+dataset = pima.assign(
+    SkinThickness=pima['SkinThickness'].replace(0, pima['SkinThickness'].mean())
+)
+
+ax = plt.subplots(figsize=(2,3))
+sns.boxplot(data=dataset, y='SkinThickness');
+
+pima.columns
+
+"""this will look cryptic; you don't need to fully understand the details of the
+code. The gist of it is that, as above, it replaces 0's by the mean value of
+the column in question. There are 7 columns considered; instead of copying-
+and-pasting, I decided to use a more generic and concise code snippet that
+relies on loops and some more advanced concepts. The variable `dataset` points
+to the processed DataFrame (the one with replaced values)"""
+cols_with_missing_values = [ 
+    'Glucose', 'BloodPressure', 'Insulin', 'BMI', 
+    'SkinThickness', 'DiabetesPedigreeFunction', 'Age'
+]
+dataset = pima
+for col in cols_with_missing_values:
+    dataset = dataset.assign(
+        **{ col: pima[col].replace(0, pima[col].mean()) }
+    )
+
+### Predictors and Class
+
+ax = plt.subplots(figsize=(4,3))
+sns.boxplot(
+    data=dataset, 
+    x='Outcome', 
+    y='Glucose'
+);
+
+ax = plt.subplots(figsize=(4,3))
+sns.boxplot(
+    data=pima.loc[ pima['Glucose']!=0 ], 
+    x='Outcome', 
+    y='Glucose'
+);
+
+"""Another one that would look cryptic; the intuition to keep here is that it
+produces a boxplot for each feature (predictor) that is conditioned on the target.
+We see how the values of the different are distributed for each possible outcome."""
+
+predictors = ['Pregnancies', 'Glucose', 'BloodPressure', 'Insulin', 'BMI', 'SkinThickness']
+
+fig, axs = plt.subplots(2, 3, figsize=(9,7), constrained_layout=True)
+fig.suptitle('Outcome (Non-Diabetic/Diabetic) Distribution Conditioned on Features')
+for ax, predictor in zip(axs.ravel(), predictors):
+    sns.boxplot(data=pima.loc[ pima[predictor]!=0 ], x='Outcome', y=pima[predictor], ax=ax)
+    # ax.set_title(predictor, fontsize='small')
+    ax.set_title(predictor)
+    ax.set_xlabel('')
+    ax.set_ylabel('')
+    # ax.tick_params(axis='both', labelsize='small')
+    ax.tick_params(axis='both')
+    
+fig.savefig('../figures/target-dist-cond-feat.png', pad_inches=0.1, bbox_inches='tight', dpi=300)
+
+**Breakpoint**: Based on the boxplots above showing the class distributions conditioned on some of the numeric features, which of the latter would you say would be the best predictor of `Outcome` values and why?
+
+## A Minimal Train/Evaluate Workflow
+
+from sklearn.model_selection import train_test_split
+from sklearn.neighbors import KNeighborsClassifier
+
+X = dataset.drop(columns='Outcome')
+y = dataset['Outcome']
+X.shape, y.shape
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.25, random_state=0,
+)
+X_train.shape, y_train.shape, X_test.shape, y_test.shape
+
+knnc = KNeighborsClassifier(3)
+
+knnc.fit(X_train, y_train)
+
+knnc.score(X_test, y_test)
+
+knnc.score(X_train, y_train)
+
+knnc = KNeighborsClassifier(7)
+knnc.fit(X_train, y_train)
+knnc.score(X_test, y_test), knnc.score(X_train, y_train)
+
+### Drilling Down Evaluation
+
+from sklearn.metrics import balanced_accuracy_score, accuracy_score
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+
+cm = confusion_matrix(
+    y_test, knnc.predict(X_test)
+)
+ConfusionMatrixDisplay(confusion_matrix=cm).plot();
+
+cm = confusion_matrix(
+    y_test, knnc.predict(X_test), normalize='true'
+)
+ConfusionMatrixDisplay(confusion_matrix=cm).plot();
+
+accuracy_score(y_test, knnc.predict(X_test))
+
+balanced_accuracy_score(y_test, knnc.predict(X_test))
+
+## Takeaways
+
+### Python and Packages
+
+* A first look at Jupyter lab, notebooks, code and markdown text, inline outputs, ToC
+* strings and identifiers (e.g., variables, parameters), quotes
+* comments (`#` and `"""`)
+* variables as aliases to objects
+* literals as use-once and discard objects
+* DataFrame objects and methods
+* positional and named arguments to methods and functions
+* tuples (e.g., `figsize`)
+* lists (e.g., `predictors`)
+* subsetting DataFrames with `.loc` and boolean masks (please see PDSH)
+* DataFrame `.columns` and `.shape`
+* syntax: whitespaces, `[]` in context, `()` in context, `.` for methods, `''` and `""`
+* first template for plotting with `seaborn`
